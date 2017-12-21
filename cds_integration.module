@@ -1,0 +1,387 @@
+<?php
+
+/**
+ * @file
+ * Code for the CDS integration feature.
+ */
+
+include_once 'cds_integration.features.inc';
+ 
+ /**
+ * Implementation of hook_help()
+ */
+
+function cds_integration_help($path, $arg) {  
+  if ($path == 'admin/help#cds_integration') {
+  global $base_url;
+    $output = '
+
+    <h1>About</h1>
+    <p>This module enables the integration between Drupal Media and Drupal Media oEmbed modules and CDS.</p>
+    <p>At the moment, what you can do with it is embedding IMAGES coming from CDS. It also provides an interface to syncronize the attributes: caption, attribution, copyright and terms of use.</p>
+
+    <h2>How to use this module</h2>
+    <ol>
+      <li>
+        Add a File field to the content type you want to embed a CDS file in.<br>
+        - Field type should be: <strong>File</strong><br>
+        - Widget should be: <strong>Media File Selector</strong><br>
+        Configure it so that the allowed file extensions are image types (ie. jpg, jpeg, png, gif) 
+      </li>
+      <li>
+        Configure the Display options for the content type. To render the file with the style provided by the module, select: <br>
+        - as format: <strong>Rendered file</strong><br>
+        - as view mode: <strong>Default</strong>
+      </li>
+      <li>
+        Configure the '.l('File Display', $base_url.'#overlay=admin/structure/file-types/manage/image/file-display').' options for the Image file type. Make sure that the display precedence order for <br>
+        - '.l('Default view', $base_url.'/admin/structure/file-types/manage/image/file-display').' is: 1. oEmbed 2. oEmbed Thumbnail<br>
+        - '.l('Preview view', $base_url.'/admin/structure/file-types/manage/image/file-display/media_preview').' is: 1. oEmbed Thumbnail 2. oEmbed<br>
+      </li>
+      <li>
+        Now you can start embedding images on the nodes of the content type you have configured before.
+        - Add a new node or edit an existing one
+        - Click on <strong>Select media</strong>
+        - Go to the <strong>Web</strong> tab and paste the URL to the CDS file you want to embed (the allowed formats are listed '.l('here', $base_url.'/admin/config/media/oembed/provider/list/cds/edit').'), <strong>Submit</strong>.
+        - Now the image should be loaded and embedded on your node. 
+        - You can edit the image fields by clicking on <strong>Edit media</strong> button. Here you can choose to synchronize the attributes from CDS or override them.
+      </li>
+    </ol>
+    
+    <h2>Known issues</h2>
+    <p>Embedding or editing the CDS files could take a while sometimes. This is due to an '.l('issue', 'http://drupal.org/node/1600610').' with the Media module.
+    Some errors related to this might appear sometimes:</p>
+    
+    <p class="error"><em>Notice: Undefined property: stdClass::$image_dimensions in file_entity_file_update() (line 63 of /<yoursite>/sites/all/modules/file_entity/file_entity.file.inc).</em></p>
+    
+    
+    ';
+	  return $output;
+	}  
+}
+
+/**
+  * Implement hook_enable()
+  */
+function cds_integration_enable() {
+  variable_set('file_lock_hook', 'all');
+  variable_set('file_lock_mode', 'all');
+}
+
+/**
+* Implementation of hook_menu()
+*/
+
+function cds_integration_menu() {
+  $items = array();
+  $items['admin/config/media/cds_integration'] = array(
+    'title' => 'CDS integration',
+    'description' => 'Configurations for CDS integration',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('cds_integration_settings_form'),
+    'access arguments' => array('Administer CERN CDS integration'),
+    'file' => 'cds_integration.admin.inc',
+  );
+  
+  return $items;
+}
+
+/**
+ * Implementation of hook_permission()
+ */
+
+function cds_integration_permission() {
+  return array
+  ('Administer CERN CDS integration' => array('title' => 'Administer CERN CDS Integration'));
+}
+
+
+
+/**
+ * Implementation of hook_file_insert()
+ */
+function cds_integration_file_insert($file){
+  if ($file->filemime == 'image/oembed') {
+    $file->field_cds_source['und'][0]['title'] = t('More info about this image.');
+    $file->field_cds_source['und'][0]['url'] = str_replace('oembed://', '',urldecode($file->uri));
+      _cds_integration_update_cds_attributes($file);
+
+  }
+}
+
+
+/**
+ * Implementation of hook_file_presave()
+ */
+function cds_integration_file_presave($file){
+  if (_cds_integration_is_cds_file($file))
+    if ((isset($file->field_get_attributes_from_cds))&&($file->field_get_attributes_from_cds['und'][0]['value']==='1')) {
+//    if (($file->field_get_attributes_from_cds['und'][0]['value']==='1')) {
+      _cds_integration_update_cds_attributes($file);
+    }
+}
+
+
+/**
+ * Implementation of hook_form_alter()
+ */
+function cds_integration_form_alter(&$form, &$form_state, $form_id){
+  /*
+  dpm($form);
+  dpm($form_id);
+  dpm($form_state);
+  */
+  
+  //file_entity_add_upload
+  if ($form_id=='file_entity_add_upload') {
+    $form['cds_integration_note']=array(
+      '#markup'=>'<p style="color:red">'.t('The files uploaded through this form will be local to the site. <br> It\'s recommended to use the "Web" option instead, this will allow you to embed files from CDS.').'</p>',
+      '#type' => 'item',
+    );
+  }
+
+  // media_internet_add
+  if ($form_id=='media_internet_add') {
+
+    $form['embed_code']['#title']='URL';
+    $form['embed_code']['#description']='Input a url from one of the listed providers.';
+    foreach ($form['providers']['#items'] as $key => $item) {
+       if ($item['data']=='oEmbed') {
+         $providers = oembedcore_provider_list();
+         if (!$providers) 
+           $item['data']='oEmbed (No providers defined yet)';
+         else {
+            $item['data'] = '';
+            foreach ($providers as $prov => $provider) {
+              $item['data'] .= ', ' . $prov;
+            }
+            $item['data'] .= ' (oEmbed)';
+            $form['providers']['#items'][$key] = substr($item['data'],1);
+          }
+       }
+    }
+  }
+  
+  // file_entity_edit
+  if ($form_id=='file_entity_edit')
+  {
+    $file = $form_state['build_info']['args'][0];
+    if (_cds_integration_is_cds_file($file))
+ //   if (($file->filemime == 'image/oembed')&&
+ //   ((strlen(stristr($file->uri,'cdsweb.cern.ch'))>0) || (strlen(stristr($file->uri,'cds.cern.ch'))>0))  )
+    {
+/*        $form['field_cds_caption']['#states'] = array(
+          'visible' => array(
+           ':input[name="field_get_attributes_from_cds[und]"]' => array('value' => 0),
+          ),
+        );
+        $form['field_cds_attribution']['#states'] = array(
+          'visible' => array(
+           ':input[name="field_get_attributes_from_cds[und]"]' => array('value' => 0),
+          ),
+        );
+        $form['field_cds_copyright']['#states'] = array(
+          'visible' => array(
+           ':input[name="field_get_attributes_from_cds[und]"]' => array('value' => 0),
+          ),
+        );
+        $form['field_cds_terms_of_use']['#states'] = array(
+          'visible' => array(
+           ':input[name="field_get_attributes_from_cds[und]"]' => array('value' => 0),
+          ),
+        );*/
+/*        $form['field_cds_source']['#states'] = array(
+          'visible' => array(
+           ':input[name="field_get_attributes_from_cds[und]"]' => array('value' => 0),
+          ),
+        );
+*/
+   }
+   else {
+        unset($form['field_get_attributes_from_cds']);
+
+   }
+   
+  }
+}
+
+/* Helper function to get the attributes from CDS
+ * Input: URI of the CDS file to get the attributes of
+ * Output: array of attributes
+ */ 
+function _cds_integration_get_attributes($uri) {
+  $url = urldecode(str_replace('oembed://', '', $uri));
+  $res = drupal_http_request('http://cds.cern.ch/api/oembed?url='.$url.'&format=json');
+  return json_decode($res->data);
+}
+
+/* Helper function to update the attributes of the media file with the updated values from CDS
+ * Input: file to be updated by reference
+ * Output: file updated
+ */ 
+function _cds_integration_update_cds_attributes(&$file) {
+
+//dpm($file);
+  $data = _cds_integration_get_attributes($file->uri);
+//  dpm($data);
+  $file->field_cds_caption['und'][0]['value'] = _cds_integration_truncate($data->title, 255);
+  $file->field_cds_attribution['und'][0]['title'] = _cds_integration_truncate($data->author_name,255);
+ // $file->field_cds_attribution['und'][0]['url'] = _cds_integration_truncate($data->author_url,255);
+  $file->field_cds_copyright['und'][0]['title'] = _cds_integration_truncate(html_entity_decode($data->copyright, ENT_COMPAT, "UTF-8"), 255).'.';
+  $file->field_cds_copyright['und'][0]['url'] = _cds_integration_truncate(html_entity_decode($data->copyright_url, ENT_COMPAT, "UTF-8"), 255).'.';
+}
+
+
+/*
+ * Implements hook_file_operation_info().
+ */
+function cds_integration_file_operation_info() {
+  $info['sync_cds_attributes'] = array(
+    'label' => t('Sync attributes with CDS'),
+    'callback' => 'cds_integration_sync_attributes_operation',
+  );
+  $info['force_sync_cds_attributes'] = array(
+    'label' => t('Force sync with CDS attributes'),
+    'callback' => 'cds_integration_force_sync_attributes_operation',
+  );
+
+  return $info;
+}
+
+function cds_integration_sync_attributes_operation($fids) {
+  $files = file_load_multiple($fids);
+  foreach ($files as $file) {
+      if (_cds_integration_is_cds_file($file)) { 
+        if ((isset($file->field_get_attributes_from_cds))&&($file->field_get_attributes_from_cds['und'][0]['value']==='1')) {
+            _cds_integration_update_cds_attributes($file);
+            // save file in db with new attributes
+            file_save($file);
+            drupal_set_message(t('The file <em> !file </em> has ben syncronized with CDS.', array('!file' => $file->filename)), 'status');
+        } else {
+           drupal_set_message(t('The file <em> !file </em> hasn\'t been syncronized with CDS because the option "Sync attributes from CDS" is not checked.', array('!file' => $file->filename)), 'warning');
+        }   
+      } else {
+        drupal_set_message(t('The file <em> !file </em> is not embedded from CDS and it cannot be syncronized.', array('!file' => $file->filename)), 'warning');      
+      } 
+  }
+}
+
+function cds_integration_force_sync_attributes_operation($fids) {
+  $files = file_load_multiple($fids);
+  foreach ($files as $file) {
+      if (_cds_integration_is_cds_file($file)) { 
+        _cds_integration_update_cds_attributes($file);
+        // save file in db with new attributes
+        file_save($file);
+        drupal_set_message(t('The file <em> !file </em> has ben syncronized with CDS.', array('!file' => $file->filename)), 'status');
+      } else {
+        drupal_set_message(t('The file <em> !file </em> is not embedded from CDS and it cannot be syncronized.', array('!file' => $file->filename)), 'warning');      
+      } 
+  }
+}
+/*
+ * Implements hook_cron().
+ */
+function cds_integration_cron(){
+  $sync = variable_get('cds_integration_enable_cds_sync', FALSE);
+  if ($sync) {
+  $results = db_select('file_managed', 'f')
+    ->fields('f')
+    ->condition('filemime', 'image/oembed','=')
+    ->execute()
+    ->fetchAll();
+ $queue = DrupalQueue::get('get_cds_attrs');
+  foreach ($results as $item) {
+    $queue->createItem(array($item->fid));
+  }
+
+ }
+
+}
+
+/*
+ * Implements hook_cron_queue_info().
+ */
+function cds_integration_cron_queue_info(){
+  $queues['get_cds_attrs'] = array(
+    'worker callback' => 'cds_integration_sync_attributes_operation',
+    'time' => 120,
+  );
+  return $queues;
+}
+ 
+
+
+function _cds_integration_is_cds_file($file) {
+  if ($file->filemime == 'image/oembed')
+    if ((strlen(stristr($file->uri,'cdsweb.cern.ch'))>0)
+       ||
+        (strlen(stristr($file->uri,'cds.cern.ch'))>0))  
+       return true;
+    else 
+       return false;
+}
+
+/*
+ * Implements hook_preprocess_field().
+ * Add link to images uploaded so that they point to the uploaded file in cds
+ */
+function cds_integration_preprocess_field(&$variables){
+  foreach ($variables['items'] as $i => $item) {
+    if (isset($item['file']['#file']))
+      if ($item['file']['#file']->filemime == 'image/oembed' ) {
+      //dpm($item);
+        $variables['items'][$i]['links']['#attributes']['class'][] = 'cds';
+        if ($item['#view_mode'] != 'media_preview') $variables['classes_array'][] = 'cds';
+      }
+    if (in_array($variables['element']['#field_name'], array('field_cds_attribution'))) {
+      $variables['items'][0]['#markup'] = 'Image: '.$variables['items'][0]['#markup'].' /&nbsp;';
+    }
+    if (in_array($variables['element']['#field_name'], array('field_cds_copyright','field_cds_terms_of_use'))) {
+    
+      $variables['items'][0]['#markup'] = $variables['items'][0]['#markup'].'&nbsp;';
+    }
+//    if (in_array($variables['element']['#field_name'], array('field_cds_terms_of_use'))) {
+//      $variables['items'][0]['#markup'] .= '.';
+//    }
+  }
+
+}
+
+/**
+ * Implements of hook_theme().
+ */
+/*function cds_integration_theme() {
+  $path = drupal_get_path('module', 'cds_integration') . '/theme';
+  return array(
+    'oembed' => array(
+      'template' => 'oembed',
+      'file' => 'oembedcore_theme.inc',
+      'path' => $path,
+      'variables' => array('embed' => NULL, 'title' => '', 'content' => ''),
+    ),
+  );
+}
+
+*/
+/**
+ * Helper function to truncate a string to a max value (255 char by default) and add a terminator in the end.
+ */
+function _cds_integration_truncate($string, $chars = 255, $terminator = ' …') {
+  if (strlen($string)>$chars){
+    $cutPos = $chars - mb_strlen($terminator);
+    $boundaryPos = mb_strrpos(mb_substr($string, 0, mb_strpos($string, ' ', $cutPos)), ' ');
+    return mb_substr($string, 0, $boundaryPos === false ? $cutPos : $boundaryPos) . $terminator;
+ }
+ 
+ else return $string;
+}
+
+
+/**
+ * Implements of hook__theme_registry_alter().
+ */
+function cds_integration_theme_registry_alter(&$theme_registry){
+  $theme_registry['oembed']['path'] = drupal_get_path('module', 'cds_integration') . '/theme';;
+  $theme_registry['oembed']['theme path'] = drupal_get_path('module', 'cds_integration');
+}

@@ -1,0 +1,41 @@
+.cds .file-image-oembed{
+  background-color:#1b1b1b;
+  padding:0 12px 6px;
+  padding:0 1.2rem 0.5rem;
+  color:#fff;
+  font-family:"PT Sans Caption",Verdana,Tahoma,"DejaVu Sans",sans-serif;
+  font-size:13px;
+  font-size:1.3rem;
+  line-height:21px;
+  line-height:2.1rem;
+  margin-bottom:2.1rem;
+  overflow:hidden;*zoom:1
+}
+.cds .file-image-oembed .oembed-title, 
+.cds .file-image-oembed .field-label{display:none}
+.cds .file-image-oembed img{
+  width:116%;
+  max-width:inherit;
+  margin-left:-13px;
+  margin-left:-1.3rem;
+  margin-bottom:0.5rem
+}
+.cds .file-image-oembed .field{   margin-right:0em;}
+.cds .file-image-oembed p{margin:0}
+
+
+.cds div.ctools-modal-content .form-item label{float: none;width: inherit;} 
+.cds div.field-name-field-cds-caption {margin-top: 0.2em;margin-bottom: 0.1em;} 
+.cds div.field-name-field-cds-attribution,
+.cds div.field-name-field-cds-copyright,
+.cds div.field-name-field-cds-terms-of-use,
+.cds div.field-name-field-cds-source {float:left;font-family:"PT Serif",Georgia,"DejaVu",serif;font-size: 0.9em;font-style: italic;color: #999;}
+.cds div.field-name-field-cds-attribution a,
+.cds div.field-name-field-cds-copyright a,
+.cds div.field-name-field-cds-terms-of-use a,
+.cds div.field-name-field-cds-source a {color: #999;} 
+.cds div.field-name-field-cds-attribution a:hover,
+.cds div.field-name-field-cds-copyright a:hover,
+.cds div.field-name-field-cds-terms-of-use a:hover,
+.cds div.field-name-field-cds-source a:hover {color: #fff;}
+
